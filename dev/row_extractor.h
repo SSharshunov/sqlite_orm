@@ -14,6 +14,7 @@
 #include <tuple>  //  std::tuple, std::tuple_size, std::tuple_element
 
 #include "arithmetic_tag.h"
+#include "pointer_value.h"
 #include "journal_mode.h"
 #include "error_code.h"
 
@@ -35,6 +36,27 @@ namespace sqlite_orm {
         //  used in user defined functions
         V extract(sqlite3_value* value) const;
     };
+
+    /**
+     *  Specialization for the 'pointer-passing interface'.
+     * 
+     *  @note The 'pointer-passing' interface doesn't support (and in fact prohibits)
+     *  extracting pointers from columns.
+     */
+    template<class P, class T>
+    struct row_extractor<pointer_arg<P, T>, void> {
+        using V = pointer_arg<P, T>;
+
+        V extract(sqlite3_value* value) const {
+            return {(P*)sqlite3_value_pointer(value, T::value)};
+        }
+    };
+
+    /**
+     * Undefine using pointer_binding<> for querying values
+     */
+    template<class P, class T, class D>
+    struct row_extractor<pointer_binding<P, T, D>, void>;
 
     /**
      *  Specialization for arithmetic types.

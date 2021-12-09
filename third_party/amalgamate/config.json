@@ -9,6 +9,7 @@
         "dev/tuple_helper/tuple_transformer.h",
         "dev/tuple_helper/count_tuple.h",
         "dev/tuple_helper/same_or_void.h",
+		"dev/xdestroy_handling.h",
 		"dev/type_printer.h",
 		"dev/collate_argument.h",
 		"dev/constraints.h",
@@ -26,6 +27,7 @@
 		"dev/table_info.h",
 		"dev/statement_finalizer.h",
 		"dev/arithmetic_tag.h",
+		"dev/pointer_value.h",
 		"dev/statement_binder.h",
 		"dev/row_extractor.h",
 		"dev/util.h",
@@ -39,7 +41,8 @@
 		"dev/storage.h",
 		"dev/finish_macros.h",
 		"dev/node_tuple.h",
-		"dev/get_prepared_statement.h"
+		"dev/get_prepared_statement.h",
+		"dev/carray.h"
 	],
 	"include_paths": ["dev"]
 }

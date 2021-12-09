@@ -11,5 +11,4 @@ namespace sqlite_orm {
      */
     using statement_finalizer =
         std::unique_ptr<sqlite3_stmt, std::integral_constant<decltype(&sqlite3_finalize), sqlite3_finalize>>;
-
 }

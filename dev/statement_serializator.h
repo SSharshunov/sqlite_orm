@@ -24,6 +24,7 @@
 #include "function.h"
 #include "ast/upsert_clause.h"
 #include "ast/excluded.h"
+#include "ast/group_by.h"
 
 namespace sqlite_orm {
 
@@ -240,7 +241,7 @@ namespace sqlite_orm {
                 if(context.replace_bindable_with_question) {
                     return "?";
                 } else {
-                    return "\'" + c + "\'";
+                    return "'" + c + "'";
                 }
             }
         };
@@ -258,6 +259,22 @@ namespace sqlite_orm {
                 }
             }
         };
+
+#ifdef SQLITE_ORM_STRING_VIEW_SUPPORTED
+        template<>
+        struct statement_serializator<std::string_view, void> {
+            using statement_type = std::string_view;
+
+            template<class C>
+            std::string operator()(const std::string_view& c, const C& context) const {
+                if(context.replace_bindable_with_question) {
+                    return "?";
+                } else {
+                    return "'" + std::string(c) + "'";
+                }
+            }
+        };
+#endif
 
         template<class O, class F>
         struct statement_serializator<F O::*, void> {
@@ -1007,30 +1024,29 @@ namespace sqlite_orm {
                 auto& tImpl = context.impl.template get_impl<object_type>();
 
                 std::stringstream ss;
-                ss << "UPDATE '" << tImpl.table.name << "' SET ";
+                ss << "UPDATE '" << tImpl.table.name << "' SET";
                 std::vector<std::string> setColumnNames;
-                tImpl.table.for_each_column([&setColumnNames](auto& c) {
-                    if(!c.template has<primary_key_t<>>()) {
-                        setColumnNames.emplace_back(c.name);
+                tImpl.table.for_each_column([&setColumnNames, &tImpl](auto& column) {
+                    if(!column.template has<primary_key_t<>>() &&
+                       !tImpl.table.exists_in_composite_primary_key(column)) {
+                        setColumnNames.emplace_back(column.name);
                     }
                 });
                 for(size_t i = 0; i < setColumnNames.size(); ++i) {
-                    ss << "\"" << setColumnNames[i] << "\""
+                    ss << " \"" << setColumnNames[i] << "\""
                        << " = ?";
                     if(i < setColumnNames.size() - 1) {
                         ss << ",";
                     }
-                    ss << " ";
                 }
-                ss << "WHERE ";
+                ss << " WHERE";
                 auto primaryKeyColumnNames = tImpl.table.primary_key_column_names();
                 for(size_t i = 0; i < primaryKeyColumnNames.size(); ++i) {
-                    ss << "\"" << primaryKeyColumnNames[i] << "\""
+                    ss << " \"" << primaryKeyColumnNames[i] << "\""
                        << " = ?";
                     if(i < primaryKeyColumnNames.size() - 1) {
                         ss << " AND";
                     }
-                    ss << " ";
                 }
                 return ss.str();
             }
@@ -1283,23 +1299,25 @@ namespace sqlite_orm {
             auto& tImpl = context.impl.template get_impl<object_type>();
             std::stringstream ss;
             ss << "REPLACE INTO '" << tImpl.table.name << "' (";
-            auto columnNames = tImpl.table.column_names();
-            auto columnNamesCount = columnNames.size();
-            for(size_t i = 0; i < columnNamesCount; ++i) {
-                ss << "\"" << columnNames[i] << "\"";
-                if(i < columnNamesCount - 1) {
-                    ss << ", ";
+
+            auto columnIndex = 0;
+            auto columnsCount = tImpl.table.count_columns_amount();
+            tImpl.table.for_each_column([&ss, &columnIndex, columnsCount](auto& column) {
+                ss << " \"" << column.name << "\"";
+                if(columnIndex < columnsCount - 1) {
+                    ss << ",";
                 } else {
-                    ss << ") ";
+                    ss << ")";
                 }
-            }
-            ss << "VALUES ";
-            auto valuesString = [columnNamesCount] {
+                ++columnIndex;
+            });
+            ss << " VALUES ";
+            auto valuesString = [columnsCount] {
                 std::stringstream ss_;
                 ss_ << "(";
-                for(size_t i = 0; i < columnNamesCount; ++i) {
+                for(auto i = 0; i < columnsCount; ++i) {
                     ss_ << "?";
-                    if(i < columnNamesCount - 1) {
+                    if(i < columnsCount - 1) {
                         ss_ << ", ";
                     } else {
                         ss_ << ")";
@@ -1348,19 +1366,19 @@ namespace sqlite_orm {
                 std::make_pair(context.impl.find_table_name(typeid(primary_type)), std::string{}));
             iterate_ast(get.conditions, collector);
             std::stringstream ss;
-            ss << "SELECT ";
+            ss << "SELECT";
             auto& tImpl = context.impl.template get_impl<primary_type>();
-            auto columnNames = tImpl.table.column_names();
-            for(size_t i = 0; i < columnNames.size(); ++i) {
-                ss << "\"" << tImpl.table.name << "\"."
-                   << "\"" << columnNames[i] << "\"";
-                if(i < columnNames.size() - 1) {
-                    ss << ", ";
-                } else {
-                    ss << " ";
+            auto columnIndex = 0;
+            auto columnsCount = tImpl.table.count_columns_amount();
+            tImpl.table.for_each_column([&ss, &columnIndex, columnsCount, &tImpl](auto& column) {
+                ss << " \"" << tImpl.table.name << "\"."
+                   << "\"" << column.name << "\"";
+                if(columnIndex < columnsCount - 1) {
+                    ss << ",";
                 }
-            }
-            ss << "FROM ";
+                ++columnIndex;
+            });
+            ss << " FROM ";
             std::vector<std::pair<std::string, std::string>> tableNames(collector.table_names.begin(),
                                                                         collector.table_names.end());
             for(size_t i = 0; i < tableNames.size(); ++i) {
@@ -1417,25 +1435,25 @@ namespace sqlite_orm {
             using primary_type = typename T::type;
             auto& tImpl = context.impl.template get_impl<primary_type>();
             std::stringstream ss;
-            ss << "SELECT ";
-            auto columnNames = tImpl.table.column_names();
-            for(size_t i = 0; i < columnNames.size(); ++i) {
-                ss << "\"" << columnNames[i] << "\"";
-                if(i < columnNames.size() - 1) {
-                    ss << ",";
+            ss << "SELECT";
+            auto columnIndex = 0;
+            auto columnsCount = tImpl.table.count_columns_amount();
+            tImpl.table.for_each_column([&ss, &columnIndex, columnsCount](auto& column) {
+                ss << " \"" << column.name << "\"";
+                if(columnIndex < columnsCount - 1) {
+                    ss << ", ";
                 }
-                ss << " ";
-            }
-            ss << "FROM '" << tImpl.table.name << "' WHERE ";
+                ++columnIndex;
+            });
+            ss << " FROM '" << tImpl.table.name << "' WHERE ";
             auto primaryKeyColumnNames = tImpl.table.primary_key_column_names();
             if(!primaryKeyColumnNames.empty()) {
                 for(size_t i = 0; i < primaryKeyColumnNames.size(); ++i) {
-                    ss << "\"" << primaryKeyColumnNames[i] << "\""
-                       << " = ? ";
+                    ss << " \"" << primaryKeyColumnNames[i] << "\""
+                       << " = ?";
                     if(i < primaryKeyColumnNames.size() - 1) {
-                        ss << "AND";
+                        ss << " AND";
                     }
-                    ss << ' ';
                 }
                 return ss.str();
             } else {
@@ -1464,23 +1482,33 @@ namespace sqlite_orm {
         };
 
         template<>
+        struct statement_serializator<conflict_action, void> {
+            using statement_type = conflict_action;
+
+            template<class C>
+            std::string operator()(const statement_type& statement, const C& context) const {
+                switch(statement) {
+                    case conflict_action::replace:
+                        return "REPLACE";
+                    case conflict_action::abort:
+                        return "ABORT";
+                    case conflict_action::fail:
+                        return "FAIL";
+                    case conflict_action::ignore:
+                        return "IGNORE";
+                    case conflict_action::rollback:
+                        return "ROLLBACK";
+                }
+            }
+        };
+
+        template<>
         struct statement_serializator<insert_constraint, void> {
             using statement_type = insert_constraint;
 
             template<class C>
             std::string operator()(const statement_type& statement, const C& context) const {
-                switch(statement) {
-                    case insert_constraint::abort:
-                        return "OR ABORT";
-                    case insert_constraint::fail:
-                        return "OR FAIL";
-                    case insert_constraint::ignore:
-                        return "OR IGNORE";
-                    case insert_constraint::replace:
-                        return "OR REPLACE";
-                    case insert_constraint::rollback:
-                        return "OR ROLLBACK";
-                }
+                return "OR " + serialize(statement.action, context);
             }
         };
 
@@ -1601,13 +1629,13 @@ namespace sqlite_orm {
                 if(statement.unique) {
                     ss << "UNIQUE ";
                 }
-                using columns_type = typename std::decay<decltype(statement)>::type::columns_type;
-                using head_t = typename std::tuple_element<0, columns_type>::type::column_type;
+                using elements_type = typename std::decay<decltype(statement)>::type::elements_type;
+                using head_t = typename std::tuple_element<0, elements_type>::type::column_type;
                 using indexed_type = typename table_type<head_t>::type;
                 ss << "INDEX IF NOT EXISTS '" << statement.name << "' ON '"
                    << context.impl.find_table_name(typeid(indexed_type)) << "' (";
                 std::vector<std::string> columnNames;
-                iterate_tuple(statement.columns, [&columnNames, &context](auto& v) {
+                iterate_tuple(statement.elements, [&columnNames, &context](auto& v) {
                     auto columnName = serialize(v, context);
                     columnNames.push_back(move(columnName));
                 });
@@ -1825,28 +1853,54 @@ namespace sqlite_orm {
             }
         };
 
+        template<class T, class... Args>
+        struct statement_serializator<group_by_with_having<T, Args...>, void> {
+            using statement_type = group_by_with_having<T, Args...>;
+
+            template<class C>
+            std::string operator()(const statement_type& statement, const C& context) const {
+                std::stringstream ss;
+                std::vector<std::string> expressions;
+                auto newContext = context;
+                newContext.skip_table_name = false;
+                iterate_tuple(statement.args, [&expressions, &newContext](auto& v) {
+                    auto expression = serialize(v, newContext);
+                    expressions.push_back(expression);
+                });
+                ss << "GROUP BY";
+                for(size_t i = 0; i < expressions.size(); ++i) {
+                    ss << ' ' << expressions[i];
+                    if(i < expressions.size() - 1) {
+                        ss << ",";
+                    }
+                }
+                ss << " HAVING";
+                ss << ' ' << serialize(statement.expression, context);
+                return ss.str();
+            }
+        };
+
         template<class... Args>
         struct statement_serializator<group_by_t<Args...>, void> {
             using statement_type = group_by_t<Args...>;
 
             template<class C>
-            std::string operator()(const statement_type& groupBy, const C& context) const {
+            std::string operator()(const statement_type& statement, const C& context) const {
                 std::stringstream ss;
                 std::vector<std::string> expressions;
                 auto newContext = context;
                 newContext.skip_table_name = false;
-                iterate_tuple(groupBy.args, [&expressions, &newContext](auto& v) {
+                iterate_tuple(statement.args, [&expressions, &newContext](auto& v) {
                     auto expression = serialize(v, newContext);
                     expressions.push_back(expression);
                 });
-                ss << static_cast<std::string>(groupBy) << " ";
+                ss << "GROUP BY";
                 for(size_t i = 0; i < expressions.size(); ++i) {
-                    ss << expressions[i];
+                    ss << ' ' << expressions[i];
                     if(i < expressions.size() - 1) {
-                        ss << ", ";
+                        ss << ",";
                     }
                 }
-                ss << " ";
                 return ss.str();
             }
         };
@@ -1856,12 +1910,12 @@ namespace sqlite_orm {
             using statement_type = having_t<T>;
 
             template<class C>
-            std::string operator()(const statement_type& hav, const C& context) const {
+            std::string operator()(const statement_type& statement, const C& context) const {
                 std::stringstream ss;
                 auto newContext = context;
                 newContext.skip_table_name = false;
-                ss << static_cast<std::string>(hav) << " ";
-                ss << serialize(hav.t, newContext) << " ";
+                ss << "HAVING";
+                ss << " " << serialize(statement.expression, newContext);
                 return ss.str();
             }
         };

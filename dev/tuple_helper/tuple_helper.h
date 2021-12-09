@@ -3,12 +3,13 @@
 #include <tuple>  //  std::tuple, std::get, std::tuple_element, std::tuple_size
 #include <type_traits>  //  std::false_type, std::true_type
 
-#include "static_magic.h"
+#include "../static_magic.h"
 
 namespace sqlite_orm {
 
     //  got from here http://stackoverflow.com/questions/25958259/how-do-i-find-out-if-a-tuple-contains-a-type
     namespace tuple_helper {
+
         /**
          *  HAS_TYPE type trait
          */
@@ -134,7 +135,7 @@ namespace sqlite_orm {
         //  got it form here https://stackoverflow.com/questions/7858817/unpacking-a-tuple-to-call-a-matching-function-pointer
         template<class Function, class FunctionPointer, class Tuple, size_t... I>
         auto call_impl(Function& f, FunctionPointer functionPointer, Tuple t, std::index_sequence<I...>) {
-            return (f.*functionPointer)(std::get<I>(t)...);
+            return (f.*functionPointer)(std::get<I>(move(t))...);
         }
 
         template<class Function, class FunctionPointer, class Tuple>
